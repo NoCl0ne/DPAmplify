@@ -595,7 +595,7 @@ the DP noise structure is powerful on both sides of
 the security boundary.
 
 \textbf{Privacy attacks on federated learning.}
-Gradient inversion attacks~\cite{abadi2016deep} aim
+Gradient inversion attacks~\cite{zhu2019deep} aim
 to reconstruct training data from gradient updates.
 These are privacy attacks, distinct from the
 Byzantine poisoning attacks studied here. DPAmplify
@@ -771,12 +771,34 @@ compared to a clean baseline without Byzantine clients.
 % ── Conclusion ────────────────────────────────────────────────────────
 \section{Conclusion}
 
-DPAmplify demonstrates that the Gaussian DP mechanism can be exploited
-by a Byzantine client to coherently steer the global model update.  We
-provide (i) a zero-bias construction, (ii) an evasion argument based
-on norm indistinguishability, and (iii) both an upper-bound and a tight
-SNR formula that together characterise when the attack succeeds and
-when honest gradient heterogeneity naturally limits its effectiveness.
+We have shown that the Gaussian DP mechanism, widely regarded as a
+privacy shield, can be turned into an offensive tool by a Byzantine
+client. The zero-mean property of Gaussian noise is not merely a nuisance
+to be tolerated --- it is a structural handle that enables coherent,
+bias-free gradient steering without fighting the noise at all.
+
+We contributed two complementary theoretical analyses: a closed-form
+SNR upper bound $kC/(\sigma\sqrt{n-k})$ that gives quick intuition and
+a tight bound that accounts for honest gradient variance $V_h$, matching
+empirical measurements with 4.8\% relative error.
+
+For practitioners, our results imply that FL deployments relying on
+the Gaussian mechanism \emph{without} Secure Aggregation should not
+treat DP as a Byzantine defense. The norm indistinguishability of
+DPAmplify gradients means that standard anomaly detectors provide
+weak protection.
+
+\textbf{Limitation.} DPAmplify does not apply to settings that employ
+Secure Aggregation (SecAgg): when the server cannot observe individual
+client updates, the passive estimation phase is infeasible and
+$\mathbf{g}_{\mathrm{adv}}$ cannot be injected unobstructed.
+
+\textbf{Future work.} Three directions are immediately open: (i)~adaptive
+adversaries that add artificial norm jitter to evade gradient norm
+auditing, (ii)~extension of the attack and SNR analysis to non-Gaussian
+DP mechanisms (e.g., the Laplace mechanism or discrete Gaussian), and
+(iii)~analysis of multi-round adaptive clipping schemes in which $C$ is
+updated dynamically based on observed gradient statistics.
 
 % ── References ────────────────────────────────────────────────────────
 \bibliographystyle{IEEEtran}
