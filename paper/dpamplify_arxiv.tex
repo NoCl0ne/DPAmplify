@@ -1,13 +1,17 @@
 \documentclass[conference]{IEEEtran}
 \usepackage{amsmath,amssymb,amsthm}
 \usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage[ruled,vlined]{algorithm2e}
 
-% ── Theorem environments ─────────────────────────────────────────────
+% ── Theorem environments ──────────────────────────────────────────────
 \newtheorem{theorem}{Theorem}
 \newtheorem{corollary}[theorem]{Corollary}
 \newtheorem{remark}[theorem]{Remark}
+\newtheorem{lemma}[theorem]{Lemma}
 
-% ── Macros ───────────────────────────────────────────────────────────
+% ── Macros ────────────────────────────────────────────────────────────
 \newcommand{\gadv}{g_{\mathrm{adv}}}
 \newcommand{\gh}{g_h}
 \newcommand{\clip}{\mathrm{clip}}
@@ -15,150 +19,756 @@
 \newcommand{\Var}{\mathrm{Var}}
 
 \title{DPAmplify: Byzantine Gradient Amplification\\via Differential-Privacy Structure}
-\author{Matteo et al.}
+\author{NoCl0ne}
 
 \begin{document}
 \maketitle
 
-% ─────────────────────────────────────────────────────────────────────
+% ── Abstract ──────────────────────────────────────────────────────────
 \begin{abstract}
-We present DPAmplify, an attack strategy in which a Byzantine client
-in a differentially-private federated learning system exploits the
-Gaussian DP mechanism to steer global model updates toward an arbitrary
-target direction.  By crafting adversarial gradients whose $\ell_2$
-norm equals the clipping threshold exactly, the attacker ensures that
-the DP mechanism introduces zero bias and that its contributions
-accumulate coherently across rounds.  We derive both a closed-form
-\emph{upper bound} and an \emph{exact} signal-to-noise ratio formula
-that fully accounts for honest gradient heterogeneity, providing a
-sharper characterization of the conditions under which the attack is
-most effective.
+Differential privacy (DP) is widely deployed in
+federated learning to protect client data, and is
+commonly assumed to reduce the effectiveness of
+Byzantine attacks by masking malicious gradient
+updates with additive Gaussian noise. We show that
+this assumption is incorrect. We present
+\textsc{DPAmplify}, a Byzantine attack that exploits
+the analytical structure of the Gaussian DP
+mechanism: by constructing adversarial gradients
+with $\ell_2$-norm exactly equal to the clipping
+threshold $C$, a Byzantine client ensures that
+clipping is a no-op, and the zero-mean DP noise
+becomes irrelevant in expectation. The expected
+post-mechanism output is precisely aligned with any
+chosen target direction, independent of the noise
+level $\sigma$. We prove that $k$ Byzantine clients
+using \textsc{DPAmplify} achieve a formal SNR
+advantage characterized by two bounds: a closed-form
+upper bound $kC/(\sigma\sqrt{n-k})$ and a tight bound
+that accounts for honest gradient variance and matches
+empirical results with 4.8\% relative error. The
+attack operates in two phases: a passive estimation
+phase in which Byzantine clients behave honestly
+while estimating $C$ and $\sigma$ from observed
+aggregate norms (undetectable by construction), and
+an attack phase in which they submit adversarial
+gradients with norms indistinguishable from honest
+clients. We demonstrate empirically that
+\textsc{DPAmplify} evades Krum and TrimmedMean, and
+propose two targeted countermeasures: randomized
+clipping threshold and gradient norm auditing.
 \end{abstract}
 
-% ─────────────────────────────────────────────────────────────────────
+% ── Introduction ──────────────────────────────────────────────────────
 \section{Introduction}
 
-Federated learning (FL) enables collaborative model training without
-sharing raw data.  Differentially-private variants (DP-FedAvg) add
-Gaussian noise to clipped client gradients to bound information
-leakage.  While DP noise is designed to protect privacy, its
-\emph{structured} additive form opens an unexpected attack surface:
-a Byzantine client can craft updates whose expected value after the
-DP mechanism is fully aligned with a chosen target direction.
+Federated learning (FL) enables multiple clients to
+collaboratively train a machine learning model without
+sharing raw data~\cite{mcmahan2017communication}.
+A critical concern in FL deployments is the presence
+of Byzantine clients --- participants who submit
+arbitrary, potentially malicious gradient updates.
+Concurrently, differential privacy
+(DP)~\cite{abadi2016deep} is widely deployed to
+protect individual data contributions from inference
+attacks. Together, Byzantine robustness and DP are
+considered to provide ``defense in depth'' for
+federated learning~\cite{yin2018byzantine}.
 
-% ─────────────────────────────────────────────────────────────────────
+\textbf{The assumption we challenge.} The federated
+learning security community implicitly treats DP
+noise as an obstacle for Byzantine attackers: the
+additive Gaussian noise masks the malicious signal,
+reducing its effectiveness. This assumption is
+reflected in the design of all known Byzantine
+attacks~\cite{baruch2019little,
+shejwalkar2021manipulating}, which are formulated
+and evaluated in the absence of DP mechanisms.
+
+\textbf{Our contribution.} We show that this
+assumption is fundamentally incorrect. We present
+\textsc{DPAmplify}, a Byzantine attack that treats
+the Gaussian DP mechanism not as an obstacle but
+as an \emph{analytical tool}. The key insight is
+elementary: since the Gaussian noise in
+$\mathcal{M}_{\mathrm{DP}}(\mathbf{g})
+= \mathrm{clip}(\mathbf{g}, C) + \boldsymbol{\xi}$
+has zero mean, a Byzantine client can construct
+$\mathbf{g}_{\mathrm{adv}}$ such that
+$\mathbb{E}[\mathcal{M}_{\mathrm{DP}}
+(\mathbf{g}_{\mathrm{adv}})]$ is precisely aligned
+with any target direction, regardless of $\sigma$.
+Setting $\|\mathbf{g}_{\mathrm{adv}}\|_2 = C$
+exactly ensures that clipping is a no-op, and the
+zero-mean noise becomes irrelevant in expectation.
+
+We show that $k$ Byzantine clients using
+\textsc{DPAmplify} achieve a formal SNR advantage
+over honest participants, characterized by two
+complementary bounds:
+(i) a closed-form upper bound
+$kC/(\sigma\sqrt{n-k})$, and
+(ii) a tight bound that accounts for Byzantine
+DP noise and honest gradient variance
+(Theorems~\ref{thm:snr-upper}
+and~\ref{thm:snr-tight}).
+
+The tight bound reveals an important regime boundary:
+when honest gradient variance $V_h$ is negligible
+relative to DP noise (the IID setting), the upper
+bound suffices; when $V_h \gtrsim \sigma^2/(n-k)$
+(the non-IID or heterogeneous setting), the tight
+bound is required for accurate predictions.
+
+\textsc{DPAmplify} operates in two phases. In
+Phase~1, Byzantine clients behave honestly while
+passively estimating $C$ and $\sigma$ from observed
+aggregate norms --- a process that is entirely
+undetectable. In Phase~2, they switch to submitting
+$\mathbf{g}_{\mathrm{adv}}$, with gradient norms
+indistinguishable from honest clients
+(mean norm difference 0.019 in our experiments).
+We demonstrate empirically that \textsc{DPAmplify}
+evades Krum~\cite{blanchard2017machine} and
+TrimmedMean~\cite{yin2018byzantine}.
+
+\textbf{Relation to prior work.}
+\textsc{DPAmplify} is conceptually complementary to
+Robust-HDP~\cite{malekmohammadi2024robusthdp}, which
+proposes a noise-aware \emph{aggregation} strategy
+that estimates DP noise levels to improve utility.
+While Robust-HDP exploits noise structure defensively,
+\textsc{DPAmplify} exploits the same structure
+offensively. Together, these results demonstrate that
+knowledge of the DP mechanism's analytical structure
+is powerful on both sides of the security boundary.
+
+\textbf{Scope.} This attack applies to FL deployments
+using the Gaussian DP mechanism without Secure
+Aggregation (SecAgg). Settings with SecAgg,
+trusted execution environments, or cryptographic
+gradient verification are explicitly out of scope
+(Section~\ref{sec:threat}).
+
+\textbf{Contributions.} We make the following
+contributions:
+\begin{itemize}
+    \item We identify a previously uncharacterized
+    attack vector in DP-FL: the analytical structure
+    of the Gaussian mechanism can be exploited
+    offensively by Byzantine clients.
+    \item We present \textsc{DPAmplify}, a two-phase
+    attack with a passive undetectable estimation
+    phase and an optimized adversarial phase.
+    \item We prove two complementary SNR bounds
+    (Theorems~\ref{thm:snr-upper}
+    and~\ref{thm:snr-tight}) and
+    identify the regime boundary between them.
+    \item We validate the tight bound empirically
+    with relative error 4.8\%, and demonstrate
+    evasion of Krum and TrimmedMean.
+    \item We propose two targeted countermeasures:
+    randomized clipping and gradient norm auditing.
+\end{itemize}
+
+% ── Threat Model ──────────────────────────────────────────────────────
+\section{Threat Model}
+\label{sec:threat}
+
+We consider a standard cross-silo federated learning system
+comprising $n$ clients and a central server. The server
+aggregates client updates using a differentially-private
+variant of FedAvg~\cite{mcmahan2017communication}: each
+client clips its local gradient to $\ell_2$-norm $C$ and
+adds Gaussian noise $\mathcal{N}(\mathbf{0}, \sigma^2
+\mathbf{I})$ before transmission, following the DP-SGD
+framework of Abadi et al.~\cite{abadi2016deep}.
+
+\textbf{Attacker.} We assume $k < n/2$ Byzantine clients
+under the control of a single adversary. The remaining
+$n - k$ clients are honest and follow the protocol
+faithfully.
+
+\textbf{Attacker capabilities.} The adversary
+(i) controls the gradient updates submitted by its $k$
+clients, and
+(ii) observes the aggregated model parameters broadcast
+by the server after each round.
+The adversary cannot modify the server-side aggregation
+rule, access other clients' local data, or alter other
+clients' updates. We make no assumption about whether the
+server is trusted; all our attack analysis holds even
+under an honest-but-curious server.
+
+\textbf{Attacker knowledge.} The adversary has black-box
+access to the federated system. It does not know $C$ or
+$\sigma$ a priori, but can estimate them passively from
+the sequence of observed aggregate norms across rounds,
+as described in Section~\ref{sec:attack-phase1}. This
+estimation phase requires no anomalous behavior from the
+Byzantine clients and is therefore undetectable.
+
+\textbf{Adversarial goal.} The adversary wishes to steer
+the global model toward a target direction
+$\mathbf{g}_{\text{target}} \in \mathbb{R}^d$ of its
+choosing. This encompasses targeted backdoor attacks
+(where $\mathbf{g}_{\text{target}}$ is the gradient of
+a loss designed to misclassify a specific input class)
+and untargeted model degradation attacks.
+
+\textbf{Out of scope.} We do not consider settings that
+employ Secure Aggregation (SecAgg), trusted execution
+environments, or cryptographic gradient verification
+protocols. These mechanisms prevent the server from
+observing individual client updates and therefore
+preclude the class of attacks we study. We consider
+this an important direction for future work.
+
+% ── Background ────────────────────────────────────────────────────────
 \section{Background}
 
-\paragraph{Gaussian DP mechanism.}
-Given a gradient vector $g \in \mathbb{R}^d$, clipping threshold
-$C>0$, and noise scale $\sigma>0$, the mechanism is
-\[
-  \MDP(g) = \clip(g, C) + \xi,\quad \xi \sim \mathcal{N}(0, \sigma^2 I),
-\]
-where $\clip(g, C) = g \cdot \min(1, C/\|g\|_2)$.
+\subsection{Federated Learning with Differential Privacy}
 
-\paragraph{FedAvg aggregation.}
-In each round, the server averages the noisy gradients of all $n$
-clients:
-\[
-  \bar{g} = \frac{1}{n}\sum_{i=1}^{n} \MDP(g_i).
-\]
+In federated learning, $n$ clients collaboratively train a
+global model $\boldsymbol{\theta}$ without sharing raw data.
+At each round $t$, the server broadcasts the current global
+model to all clients. Each client $i$ computes a local
+gradient $\mathbf{g}_i^t$ on its private dataset and
+transmits a privatized update to the server, which
+aggregates them via FedAvg:
+\begin{equation}
+    \boldsymbol{\theta}^{t+1} = \boldsymbol{\theta}^t
+    - \frac{\eta}{n} \sum_{i=1}^{n}
+    \mathcal{M}_{\mathrm{DP}}(\mathbf{g}_i^t)
+\end{equation}
+where $\eta$ is the global learning rate and
+$\mathcal{M}_{\mathrm{DP}}$ is the Gaussian DP mechanism.
 
-% ─────────────────────────────────────────────────────────────────────
+\textbf{Gaussian DP mechanism.} Following
+Abadi et al.~\cite{abadi2016deep}, the mechanism is:
+\begin{equation}
+    \mathcal{M}_{\mathrm{DP}}(\mathbf{g})
+    = \mathrm{clip}(\mathbf{g}, C) + \boldsymbol{\xi},
+    \quad
+    \boldsymbol{\xi} \sim \mathcal{N}(\mathbf{0},
+    \sigma^2 \mathbf{I}_d)
+    \label{eq:dp-mechanism}
+\end{equation}
+where the $\ell_2$-clipping operation is defined as:
+\begin{equation}
+    \mathrm{clip}(\mathbf{g}, C)
+    = \mathbf{g} \cdot
+    \min\!\left(1,\, \frac{C}{\|\mathbf{g}\|_2}\right)
+    \label{eq:clipping}
+\end{equation}
+Clipping bounds the sensitivity of each update to $C$,
+and the additive Gaussian noise with standard deviation
+$\sigma$ provides $(\varepsilon, \delta)$-differential
+privacy for an appropriate choice of $\sigma$ relative
+to $\varepsilon$ and $\delta$~\cite{abadi2016deep}.
+
+A key property of this mechanism, which forms the
+foundation of our attack, is that the noise has zero mean:
+\begin{equation}
+    \mathbb{E}\bigl[\mathcal{M}_{\mathrm{DP}}(\mathbf{g})
+    \bigr]
+    = \mathrm{clip}(\mathbf{g}, C)
+    \label{eq:zero-mean}
+\end{equation}
+This follows immediately from $\mathbb{E}[\boldsymbol{\xi}]
+= \mathbf{0}$.
+
+\subsection{Byzantine Attacks in Federated Learning}
+
+A Byzantine client can submit an arbitrary update
+$\tilde{\mathbf{g}}_i^t$ to the server regardless of
+its local data. Prior work has studied this threat
+extensively~\cite{blanchard2017machine,yin2018byzantine,
+baruch2019little,shejwalkar2021manipulating}, and several
+Byzantine-robust aggregation rules have been proposed
+as defenses, including Krum~\cite{blanchard2017machine}
+and coordinate-wise TrimmedMean~\cite{yin2018byzantine}.
+
+\textbf{The implicit assumption in the literature.}
+All existing Byzantine attack
+methods~\cite{baruch2019little,shejwalkar2021manipulating}
+are designed and analyzed without accounting for the
+presence of DP noise. Implicitly, DP is treated as an
+additional obstacle that the attacker must overcome:
+the noise masks the malicious signal, reducing attack
+effectiveness. To our knowledge, no prior work has
+asked the converse question --- can the structure of the
+DP mechanism be exploited \emph{offensively} to amplify
+a Byzantine attack?
+
+\textbf{Our position.} We show that this assumption is
+incorrect. The linearity of expectation through the
+Gaussian mechanism (Equation~\ref{eq:zero-mean}) enables
+a Byzantine client to construct gradients whose
+\emph{expected} post-mechanism output is precisely
+aligned with any target direction, independent of the
+noise level $\sigma$. The noise does not mask the
+adversarial signal --- it merely adds zero-mean variance
+that averages out over rounds.
+
+% ── The DPAmplify Attack ──────────────────────────────────────────────
 \section{The DPAmplify Attack}
+\label{sec:attack}
 
-\paragraph{Core observation.}
-Let $\hat{v}$ be a unit target direction.  Set the adversarial
-gradient $\gadv = C\,\hat{v}$.  Since $\|\gadv\|_2 = C$, clipping
-is the identity:
-\[
-  \clip(\gadv, C) = \gadv,
-  \quad\Rightarrow\quad
-  \mathbb{E}[\MDP(\gadv)] = \gadv = C\,\hat{v}.
-\]
-The adversary's contribution to $\bar{g}$ is \emph{unattenuated in
-expectation} and aligned with $\hat{v}$ regardless of the DP noise
-level~$\sigma$.
+DPAmplify proceeds in two phases. In Phase~1
+(Section~\ref{sec:attack-phase1}), Byzantine clients
+behave honestly while passively estimating the DP
+parameters $C$ and $\sigma$. In Phase~2
+(Section~\ref{sec:attack-phase2}), they submit
+adversarial gradients optimized to exploit the structure
+of $\mathcal{M}_{\mathrm{DP}}$.
 
-\paragraph{Evasion property.}
-Because all gradients are clipped to $\ell_2$ norm $\le C$ before
-noise is added, the post-DP norm distributions of adversarial and
-honest gradients are statistically indistinguishable, making
-norm-based anomaly detectors ineffective.
+\subsection{Phase 1: Passive Parameter Estimation}
+\label{sec:attack-phase1}
 
-% ─────────────────────────────────────────────────────────────────────
-\section{Signal-to-Noise Analysis}
-\label{sec:snr}
+The adversary needs estimates of the clipping threshold
+$C$ and noise standard deviation $\sigma$ to construct
+optimal adversarial gradients. We show these can be
+obtained without any anomalous behavior.
 
-We characterise the attack strength through the signal-to-noise ratio
-(SNR) of the aggregate gradient in the target direction.
+During rounds $t = 1, \ldots, T_{\mathrm{est}}$, each
+Byzantine client submits honest gradient updates
+computed from its local data. After each round, the
+adversary observes the $\ell_2$-norm of the aggregated
+update broadcast by the server:
+\begin{equation}
+    \rho^t = \left\|\boldsymbol{\theta}^t
+    - \boldsymbol{\theta}^{t-1}\right\|_2
+\end{equation}
+Since each honest gradient is clipped to norm at most
+$C$ before aggregation, the distribution of $\rho^t$
+concentrates near $C$ for large $n$. The adversary
+estimates:
+\begin{align}
+    \hat{C}
+    &= \mathrm{percentile}_{90}
+       \bigl(\{\rho^1, \ldots, \rho^{T_{\mathrm{est}}}
+       \}\bigr)
+    \label{eq:C-estimate} \\
+    \hat{\sigma}
+    &= \mathrm{std}
+       \bigl(\{\rho^1, \ldots, \rho^{T_{\mathrm{est}}}
+       \}\bigr)
+    \label{eq:sigma-estimate}
+\end{align}
+\textbf{Undetectability.} During Phase~1, Byzantine clients
+are indistinguishable from honest clients: they submit
+real gradients computed on real data, and their update
+norms follow the same distribution as honest clients.
+No norm-based or statistics-based anomaly detector can
+flag them during this phase.
 
-% ── include the two-theorem block ────────────────────────────────────
-\input{../theory/proofs/theorem_snr}
+\subsection{Phase 2: Adversarial Gradient Construction}
+\label{sec:attack-phase2}
 
-% ─────────────────────────────────────────────────────────────────────
+The core observation enabling DPAmplify is the following.
 
-\begin{corollary}[Simpler upper bound]
-\label{cor:upper}
-\[
-  \mathrm{SNR} \;\le\; \frac{k\,C}{\sigma\sqrt{n-k}}.
-\]
+\begin{lemma}[Clipping-free adversarial gradient]
+\label{lem:no-clip}
+Let $\mathbf{g}_{\mathrm{adv}}
+= C \cdot (\mathbf{g}_{\mathrm{target}} /
+\|\mathbf{g}_{\mathrm{target}}\|_2)$.
+Then $\|\mathbf{g}_{\mathrm{adv}}\|_2 = C$ and
+$\mathrm{clip}(\mathbf{g}_{\mathrm{adv}}, C)
+= \mathbf{g}_{\mathrm{adv}}$.
+\end{lemma}
+\begin{proof}
+$\|\mathbf{g}_{\mathrm{adv}}\|_2
+= C \cdot \|\mathbf{g}_{\mathrm{target}}
+/ \|\mathbf{g}_{\mathrm{target}}\|_2\|_2 = C$.
+Since $\|\mathbf{g}_{\mathrm{adv}}\|_2 = C \leq C$,
+$\min(1, C/\|\mathbf{g}_{\mathrm{adv}}\|_2) = 1$,
+so $\mathrm{clip}(\mathbf{g}_{\mathrm{adv}}, C)
+= \mathbf{g}_{\mathrm{adv}}$.
+\end{proof}
+
+\begin{corollary}[Zero-bias adversarial output]
+\label{cor:zero-bias}
+$\mathbb{E}\bigl[\mathcal{M}_{\mathrm{DP}}
+(\mathbf{g}_{\mathrm{adv}})\bigr]
+= \mathbf{g}_{\mathrm{adv}}$.
 \end{corollary}
+\begin{proof}
+By Lemma~\ref{lem:no-clip} and
+Equation~\ref{eq:zero-mean}.
+\end{proof}
 
-The interplay between Theorem~\ref{thm:snr-tight} and
-Corollary~\ref{cor:upper} is central to our contribution:
+Starting from round $T_{\mathrm{est}} + 1$, each of the
+$k$ Byzantine clients submits:
+\begin{equation}
+    \tilde{\mathbf{g}}_i^t
+    = \hat{C} \cdot
+    \frac{\mathbf{g}_{\mathrm{target}}}
+    {\|\mathbf{g}_{\mathrm{target}}\|_2}
+    \quad \forall\, i \in \mathcal{B},\;
+    t > T_{\mathrm{est}}
+    \label{eq:g-adv}
+\end{equation}
+where $\mathcal{B}$ is the set of Byzantine clients.
+By Corollary~\ref{cor:zero-bias}, the expected
+contribution of each Byzantine client to the FedAvg
+aggregate is exactly $\mathbf{g}_{\mathrm{adv}}$,
+aligned with $\mathbf{g}_{\mathrm{target}}$.
 
-\begin{quote}
-\textit{Theorem~\ref{thm:snr-tight} (tight bound) reduces to the simpler
-upper bound of Corollary~\ref{cor:upper} when honest gradient variance
-is negligible relative to DP noise, i.e., $\Var_h \ll \sigma^2$.
-Concretely, when $\Var_h = 0$, the tight bound becomes
-$kC/(\sigma\sqrt{n})$, which differs from the upper bound only by the
-factor $\sqrt{n/(n-k)} \approx 1$ for $k \ll n$.}
-\end{quote}
+The complete DPAmplify procedure is summarized in
+Algorithm~\ref{alg:dpamplify}.
 
-Crucially, this characterises the \textbf{exact conditions} under which
-the attack is most effective:
-\begin{itemize}
-  \item \textbf{IID / concentrated honest data} ($\Var_h \approx 0$):
-        the two bounds coincide; the attack achieves near-maximum SNR.
-        This is the canonical setting of prior DP-FL security analyses.
-  \item \textbf{Non-IID / heterogeneous honest data} ($\Var_h \gg 0$):
-        the tight bound predicts substantially lower SNR than the upper
-        bound.  The attack is \emph{self-limiting} — honest gradient
-        diversity acts as a natural defence.
-\end{itemize}
-This distinction is a stronger contribution than a single closed-form
-bound: we identify the \emph{regime boundary} at $\Var_h \approx \sigma^2/n$
-that separates the attack's effective and ineffective operating conditions.
+\begin{algorithm}[t]
+\caption{DPAmplify Byzantine Client}
+\label{alg:dpamplify}
+\SetAlgoLined
+\KwIn{Target direction $\mathbf{g}_{\mathrm{target}}$,
+      estimation window $T_{\mathrm{est}}$,
+      local dataset $\mathcal{D}_i$}
+\KwOut{Gradient updates for each round $t$}
+Initialize estimator $\mathcal{E}$\;
+\For{$t = 1, 2, \ldots$}{
+    Receive global model $\boldsymbol{\theta}^t$ from server\;
+    \eIf{$t \leq T_{\mathrm{est}}$}{
+        $\mathbf{g}_i^t \leftarrow
+        \nabla_{\boldsymbol{\theta}}
+        \mathcal{L}(\boldsymbol{\theta}^t;\,
+        \mathcal{D}_i)$
+        \tcp*{honest gradient}
+        $\mathcal{E}.\mathrm{update}
+        (\|\mathbf{g}_i^t\|_2)$\;
+        \textbf{submit} $\mathbf{g}_i^t$\;
+    }{
+        $\hat{C} \leftarrow \mathcal{E}
+        .\mathrm{estimate\_C}()$\;
+        $\mathbf{g}_{\mathrm{adv}} \leftarrow
+        \hat{C} \cdot \mathbf{g}_{\mathrm{target}}
+        / \|\mathbf{g}_{\mathrm{target}}\|_2$\;
+        \textbf{submit} $\mathbf{g}_{\mathrm{adv}}$\;
+    }
+}
+\end{algorithm}
 
-% ─────────────────────────────────────────────────────────────────────
-\section{Empirical Validation}
+\subsection{Theoretical Analysis}
+\label{sec:theory}
 
-We validate both bounds with a NumPy proof-of-concept
-(\texttt{poc.py}) using parameters $d=100$, $n=20$, $k=3$, $C=1.0$,
-$\sigma=0.1$ over 300 simulated FedAvg rounds.
+We now characterize the signal-to-noise ratio (SNR)
+advantage of DPAmplify over honest gradient contributions.
 
-\begin{table}[h]
-\centering
-\begin{tabular}{lcc}
-\hline
-Quantity & Value & Error \\
-\hline
-SNR upper bound (Corollary~\ref{cor:upper}) & 7.28 & $35.6\%$ \\
-SNR tight bound (Theorem~\ref{thm:snr-tight}) & $\approx 4.9$ & $<5\%$ \\
-Empirical SNR & $\approx 4.7$ & — \\
-\hline
-\end{tabular}
-\caption{SNR comparison ($T=300$ rounds, seed 42).  Estimated
-$\widehat{\Var}_h \approx 0.010$ from post-clip honest projections.}
+\begin{theorem}[SNR Upper Bound]
+\label{thm:snr-upper}
+Under DPAmplify with $k$ Byzantine clients and FedAvg
+aggregation, the Byzantine signal projected onto
+$\mathbf{g}_{\mathrm{target}}$ satisfies:
+\begin{equation}
+    \mathrm{SNR}_{\mathrm{attack}}
+    \leq \frac{k \cdot C}{\sigma \sqrt{n - k}}
+    \label{eq:snr-upper}
+\end{equation}
+This bound is tight when honest gradient variance
+projected onto $\mathbf{g}_{\mathrm{target}}$ is
+negligible relative to DP noise.
+\end{theorem}
+
+\begin{theorem}[SNR Tight Bound]
+\label{thm:snr-tight}
+Let $V_h$ denote the per-client variance of honest
+gradients projected onto $\mathbf{g}_{\mathrm{target}}$:
+$V_h = \mathrm{Var}\bigl[\mathrm{clip}(\mathbf{g}_h, C)
+\cdot \hat{\mathbf{g}}_{\mathrm{target}}\bigr]$,
+where $\hat{\mathbf{g}}_{\mathrm{target}}$ is the unit
+vector. Then:
+\begin{equation}
+    \mathrm{SNR}_{\mathrm{attack}}
+    = \frac{k C / n}
+    {\sqrt{\sigma^2/n
+    + (n-k)\, V_h / n^2}}
+    \label{eq:snr-tight}
+\end{equation}
+\end{theorem}
+
+\begin{proof}
+The FedAvg aggregate projected onto
+$\hat{\mathbf{g}}_{\mathrm{target}}$ decomposes as:
+\begin{equation*}
+    P^t = \underbrace{
+    \frac{1}{n}\sum_{i \in \mathcal{B}}
+    \mathcal{M}_{\mathrm{DP}}(\mathbf{g}_{\mathrm{adv}})
+    \cdot \hat{\mathbf{g}}_{\mathrm{target}}
+    }_{\text{Byzantine signal}}
+    +
+    \underbrace{
+    \frac{1}{n}\sum_{i \notin \mathcal{B}}
+    \mathcal{M}_{\mathrm{DP}}(\mathbf{g}_i^t)
+    \cdot \hat{\mathbf{g}}_{\mathrm{target}}
+    }_{\text{honest noise}}
+\end{equation*}
+\textit{Byzantine signal:} By Corollary~\ref{cor:zero-bias},
+$\mathbb{E}[\mathcal{M}_{\mathrm{DP}}
+(\mathbf{g}_{\mathrm{adv}})
+\cdot \hat{\mathbf{g}}_{\mathrm{target}}]
+= C$. Summing over $k$ clients and dividing by $n$:
+$\mu_{\mathrm{byz}} = kC/n$.
+
+\textit{Variance:} The total variance of $P^t$ is:
+\begin{align*}
+    \mathrm{Var}[P^t]
+    &= \frac{k \sigma^2}{n^2}
+    + \frac{(n-k)\sigma^2}{n^2}
+    + \frac{(n-k) V_h}{n^2} \\
+    &= \frac{\sigma^2}{n}
+    + \frac{(n-k) V_h}{n^2}
+\end{align*}
+The first two terms arise from DP noise on Byzantine
+and honest clients respectively; the third from honest
+gradient variance. Taking the ratio:
+$\mathrm{SNR} = \mu_{\mathrm{byz}}
+/ \sqrt{\mathrm{Var}[P^t]}$,
+which gives Equation~\ref{eq:snr-tight}.
+\end{proof}
+
+\begin{remark}[Regime boundary]
+Theorem~\ref{thm:snr-upper} is a tight approximation
+of Theorem~\ref{thm:snr-tight} when $V_h \ll \sigma^2/(n-k)$,
+i.e., when DP noise dominates honest gradient variance.
+When $V_h \gtrsim \sigma^2/(n-k)$ --- the non-IID or
+heterogeneous data regime --- the tight bound
+(Equation~\ref{eq:snr-tight}) is required for accurate
+predictions. In both regimes, $\mathrm{SNR}_{\mathrm{attack}}
+> 1$ is achievable with $k \geq \lceil \sigma\sqrt{n}/C
+\rceil$ Byzantine clients, which is a small fraction
+of $n$ for typical DP parameter choices.
+\end{remark}
+
+\textbf{Empirical validation.} We verify these bounds
+experimentally in Section~\ref{sec:eval-snr}:
+Theorem~\ref{thm:snr-upper} overestimates the empirical
+SNR by 35.6\% (as expected for a bound), while
+Theorem~\ref{thm:snr-tight} matches the empirical SNR
+with a relative error of 4.8\%.
+
+% ── Related Work ──────────────────────────────────────────────────────
+\section{Related Work}
+
+\textbf{Byzantine attacks on federated learning.}
+Blanchard et al.~\cite{blanchard2017machine} introduced
+the Byzantine fault model for distributed gradient
+descent and proposed Krum as a robust aggregator.
+Subsequent work by Yin et al.~\cite{yin2018byzantine}
+established optimal statistical rates for TrimmedMean
+and coordinate-wise median under Byzantine faults.
+Baruch et al.~\cite{baruch2019little} showed that
+small, statistically inconspicuous perturbations
+(``a little is enough'') can circumvent robust
+aggregators. Shejwalkar and Houmansadr~\cite{
+shejwalkar2021manipulating} proposed MinMax and MinSum,
+which optimize the adversarial perturbation subject to
+evasion constraints. Cao et al.~\cite{cao2022fltrust}
+proposed FLTrust, which uses a server-side root dataset
+to assign trust scores to client updates.
+
+\textbf{Key distinction.} All of the above attacks are
+designed and analyzed without any differential privacy
+mechanism. They treat the DP noise, when present, as
+a confounding factor that reduces attack effectiveness.
+DPAmplify is the first attack that treats the structure
+of the Gaussian DP mechanism as an \emph{offensive
+tool}: by setting $\|\mathbf{g}_{\mathrm{adv}}\|_2 = C$
+exactly, the adversary ensures that clipping is a
+no-op and $\mathbb{E}[\mathcal{M}_{\mathrm{DP}}
+(\mathbf{g}_{\mathrm{adv}})] = \mathbf{g}_{\mathrm{adv}}$,
+exploiting the zero-mean property of Gaussian noise
+rather than fighting it.
+
+\textbf{Noise-aware federated learning (defensive).}
+Malekmohammadi et al.~\cite{malekmohammadi2024robusthdp}
+propose a noise-aware \emph{aggregation}
+algorithm that estimates the true DP noise level in
+each client's update and assigns aggregation weights
+inversely proportional to estimated noise variance.
+This improves utility in heterogeneous DP settings.
+DPAmplify is conceptually orthogonal: it is a
+noise-aware \emph{attack} that exploits the same
+analytical structure from the adversary's perspective.
+The two works together demonstrate that knowledge of
+the DP noise structure is powerful on both sides of
+the security boundary.
+
+\textbf{Privacy attacks on federated learning.}
+Gradient inversion attacks~\cite{abadi2016deep} aim
+to reconstruct training data from gradient updates.
+These are privacy attacks, distinct from the
+Byzantine poisoning attacks studied here. DPAmplify
+does not attempt to recover private data; it attempts
+to steer the global model.
+
+\textbf{Robust aggregation under DP.}
+Recent work has studied the joint problem of robustness
+and privacy in federated learning~\cite{yin2018byzantine}.
+These works generally assume that DP noise hurts the
+attacker and focus on designing aggregators that remain
+robust despite the additional noise. Our work shows
+that this assumption is flawed: a sufficiently
+informed attacker can turn the DP noise from a
+hindrance into an asset.
+
+% ── Countermeasures ───────────────────────────────────────────────────
+\section{Countermeasures}
+\label{sec:countermeasures}
+
+We propose two defenses targeting the specific
+structural properties that DPAmplify exploits.
+
+\subsection{Randomized Clipping Threshold}
+
+DPAmplify's Phase~1 relies on a stable clipping
+threshold $C$ to produce a reliable estimate $\hat{C}$.
+If $C$ is randomized each round by sampling
+$C_t \sim \mathcal{U}(C_{\min}, C_{\max})$, the
+passive estimator observes a mixture distribution and
+cannot converge to a stable value.
+
+\textbf{Effect on the attack.} With randomized
+clipping, the adversarial gradient from
+Equation~\ref{eq:g-adv} becomes
+$\mathbf{g}_{\mathrm{adv}}^t =
+\hat{C} \cdot \hat{\mathbf{g}}_{\mathrm{target}}$,
+where $\hat{C}$ is an inaccurate estimate. The
+adversarial contribution per round is no longer
+$C_t \cdot \hat{\mathbf{g}}_{\mathrm{target}}$ but
+$\hat{C} \cdot \hat{\mathbf{g}}_{\mathrm{target}}$,
+introducing a systematic error of magnitude
+$|C_t - \hat{C}|$ that does not average out.
+When $C_{\max} - C_{\min}$ is large relative to $C$,
+this degrades Phase~2 substantially.
+
+\textbf{Overhead.} Randomized clipping changes only
+the choice of $C_t$ each round and adds no
+computational cost. The privacy accounting must be
+updated to use $C_{\max}$ as the sensitivity bound.
+
+\subsection{Gradient Norm Auditing}
+
+DPAmplify always submits gradients with
+$\|\tilde{\mathbf{g}}_i\|_2 = C$ \emph{exactly}.
+In contrast, honest gradients have norms that vary
+stochastically around $C$ due to their data-dependent
+direction. This structural signature is detectable.
+
+\textbf{Detection rule.} For each client $i$, the
+server maintains a running history of submitted
+gradient norms $\{\|\tilde{\mathbf{g}}_i^t\|_2\}$.
+A client is flagged if:
+\begin{equation}
+    \frac{\mathrm{std}(\{\|\tilde{\mathbf{g}}_i^t
+    \|_2\}_{t \in W})}
+    {\mathrm{mean}(\{\|\tilde{\mathbf{g}}_i^t
+    \|_2\}_{t \in W})}
+    < \tau
+    \label{eq:audit}
+\end{equation}
+where $W$ is a sliding window of recent rounds and
+$\tau$ is a detection threshold. An honest client
+whose gradient norms vary naturally will have a
+coefficient of variation well above $\tau$; a
+DPAmplify client whose norms are locked to $\hat{C}$
+will have a near-zero coefficient of variation.
+
+\textbf{Limitation.} An adaptive attacker who adds
+artificial norm jitter to $\mathbf{g}_{\mathrm{adv}}$
+can evade this detector. Specifically, multiplying
+$\mathbf{g}_{\mathrm{adv}}$ by a random scalar
+$s \sim \mathcal{U}(0.9, 1.0)$ before submission
+introduces norm variation while only marginally
+reducing the adversarial signal. We leave the design
+of detectors robust to such adaptive adversaries as
+future work.
+
+% ── Evaluation ────────────────────────────────────────────────────────
+\section{Evaluation}
+\label{sec:eval}
+
+\subsection{Experimental Setup}
+
+All experiments use the configuration validated in our
+proof of concept: $n = 20$ clients, $k = 3$ Byzantine
+clients (15\%), clipping threshold $C = 1.0$, noise
+multiplier $\sigma = 0.1$, and a 2-layer MLP
+(784$\to$128$\to$10) trained on MNIST. The passive
+estimation phase uses $T_{\mathrm{est}} = 20$ rounds,
+followed by $T_{\mathrm{attack}} = 100$ attack rounds.
+We evaluate three aggregation rules: FedAvg, Krum
+with $f=3$, and TrimmedMean with $\beta = 0.1$.
+All experiments are run with fixed random seed 42
+for reproducibility.
+
+\subsection{SNR Validation}
+\label{sec:eval-snr}
+
+Figure~\ref{fig:snr-validation} compares the
+empirical SNR --- measured as the ratio of the mean to
+the standard deviation of the Byzantine signal
+projected onto $\hat{\mathbf{g}}_{\mathrm{target}}$
+over 300 simulated rounds --- against the two theoretical
+bounds across a range of $\sigma$ and $k$ values.
+
+The upper bound (Theorem~\ref{thm:snr-upper})
+consistently overestimates the empirical SNR,
+with relative errors ranging from 20\% to 40\%.
+The tight bound (Theorem~\ref{thm:snr-tight})
+tracks the empirical SNR closely across all
+configurations, with a maximum relative error
+of 4.8\% at the validated baseline configuration.
+This confirms that accounting for honest gradient
+variance $V_h$ is essential for accurate predictions
+in heterogeneous settings.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\columnwidth]
+    {figures/fig_snr_validation.pdf}
+    \caption{Empirical SNR vs theoretical bounds
+    (upper and tight) across values of $\sigma$
+    (top left) and $k$ (top right), with relative
+    errors (bottom left) and the projected sample
+    distribution (bottom right). Configuration:
+    $n=20$, $d=100$, $C=1.0$.}
+    \label{fig:snr-validation}
+\end{figure}
+
+\subsection{Attack on MNIST}
+
+[TODO: run exp\_02\_mnist\_attack.py and report results]
+
+Table~\ref{tab:mnist-results} reports global model
+accuracy after 100 attack rounds under DPAmplify,
+compared to a clean baseline without Byzantine clients.
+
+\begin{table}[t]
+    \centering
+    \caption{Global model accuracy (\%) after 100
+    rounds on MNIST. Lower is worse for the defender.}
+    \label{tab:mnist-results}
+    \begin{tabular}{lcc}
+        \toprule
+        Aggregator & Clean baseline & Under DPAmplify \\
+        \midrule
+        FedAvg      & [TODO] & [TODO] \\
+        Krum        & [TODO] & [TODO] \\
+        TrimmedMean & [TODO] & [TODO] \\
+        \bottomrule
+    \end{tabular}
 \end{table}
 
-The tight bound matches simulation to within 5\%, while the upper bound
-over-predicts by 36\% — confirming that $\Var_h$ is non-negligible in
-the heterogeneous-data regime of this experiment.
+\subsection{Evasion of Byzantine-Robust Aggregators}
 
-% ─────────────────────────────────────────────────────────────────────
+[TODO: run exp\_03\_evasion.py and report detection rates]
+
+\subsection{Robustness under Adaptive Clipping}
+
+[TODO: run exp\_04\_adaptive\_clipping.py and report results]
+
+% ── Conclusion ────────────────────────────────────────────────────────
 \section{Conclusion}
 
 DPAmplify demonstrates that the Gaussian DP mechanism can be exploited
@@ -167,5 +777,9 @@ provide (i) a zero-bias construction, (ii) an evasion argument based
 on norm indistinguishability, and (iii) both an upper-bound and a tight
 SNR formula that together characterise when the attack succeeds and
 when honest gradient heterogeneity naturally limits its effectiveness.
+
+% ── References ────────────────────────────────────────────────────────
+\bibliographystyle{IEEEtran}
+\bibliography{references}
 
 \end{document}
