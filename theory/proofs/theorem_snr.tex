@@ -1,0 +1,124 @@
+% theory/proofs/theorem_snr.tex — SNR theorems for DPAmplify
+%
+% Two results:
+%   Theorem 1a  Upper bound  (closed form, no Var_h needed)
+%   Theorem 1b  Tight bound  (depends on honest gradient variance Var_h)
+%
+% Include in the main paper via:
+%   \input{../theory/proofs/theorem_snr}
+
+% ── Notation used ────────────────────────────────────────────────────
+% n          total number of FL clients
+% k          number of Byzantine (adversarial) clients, k < n
+% C          gradient clipping threshold
+% \sigma     Gaussian DP noise standard deviation
+% \vhat      unit target direction, \|\vhat\|_2 = 1
+% \gadv      adversarial gradient = C \vhat  (so \|\gadv\|_2 = C exactly)
+% \MDP(g)    Gaussian DP mechanism: \clip(g,C) + \xi, \xi\sim\cN(0,\sigma^2 I)
+% \Var_h     per-client variance of the honest gradient projected onto \vhat,
+%            measured AFTER clipping: \Var[\clip(\gh,C)\cdot\vhat]
+% ─────────────────────────────────────────────────────────────────────
+
+\begin{theorem}[SNR Upper Bound]
+\label{thm:snr-upper}
+Let a Byzantine client submit $\gadv = C\,\vhat$ in every round of
+differentially-private \textsc{FedAvg}, where $\|\vhat\|_2=1$ and $C$ is
+the global clipping threshold.  Suppose the $n-k$ honest clients have
+zero-mean gradients.  Define the \emph{signal-to-noise ratio} of the
+aggregate gradient in direction $\vhat$ as
+\[
+  \mathrm{SNR} \;=\; \frac{\mathbb{E}\bigl[\bar{g}\cdot\vhat\bigr]}
+                          {\mathrm{std}\bigl[\bar{g}\cdot\vhat\bigr]},
+\]
+where $\bar{g} = \frac{1}{n}\sum_{i=1}^n \MDP(g_i)$.
+Then
+\[
+  \boxed{\mathrm{SNR} \;\le\; \frac{k\,C}{\sigma\sqrt{n-k}}.}
+\]
+
+\begin{proof}
+The projection of $\bar{g}$ onto $\vhat$ is
+\[
+  P \;=\; \frac{1}{n}\Bigl[
+    \sum_{i=1}^{k} \MDP(\gadv)\cdot\vhat
+    \;+\; \sum_{j=1}^{n-k} \MDP(\gh_j)\cdot\vhat
+  \Bigr].
+\]
+Since $\|\gadv\|_2 = C$, clipping is the identity on $\gadv$, giving
+$\mathbb{E}[\MDP(\gadv)\cdot\vhat] = C$.  For zero-mean honest gradients,
+$\mathbb{E}[\MDP(\gh_j)\cdot\vhat]\approx 0$.  Hence $\mathbb{E}[P] = kC/n$.
+
+The variance of $P$ satisfies (by independence of all clients and noise)
+\[
+  \Var[P]
+    = \frac{1}{n^2}\Bigl[k\,\sigma^2 + (n-k)\bigl(\Var_h+\sigma^2\bigr)\Bigr]
+    = \frac{\sigma^2}{n} + \frac{(n-k)\Var_h}{n^2}
+    \;\ge\; \frac{(n-k)\,\sigma^2}{n^2},
+\]
+where $\Var_h = \Var[\clip(\gh,C)\cdot\vhat]\ge 0$.  Therefore
+\[
+  \mathrm{SNR}
+  = \frac{kC/n}{\sqrt{\Var[P]}}
+  \;\le\; \frac{kC/n}{\sigma(n-k)^{1/2}/n}
+  = \frac{kC}{\sigma\sqrt{n-k}}.\qedhere
+\]
+\end{proof}
+\end{theorem}
+
+\begin{theorem}[Tight SNR Bound]
+\label{thm:snr-tight}
+Under the same setup as Theorem~\ref{thm:snr-upper}, let
+$\Var_h = \Var[\clip(\gh,C)\cdot\vhat]$ denote the per-client honest
+gradient variance projected onto the attack direction after clipping.
+Then the exact SNR is
+\[
+  \boxed{\mathrm{SNR}
+    = \frac{k\,C/n}
+           {\displaystyle\sqrt{\dfrac{\sigma^2}{n}
+             + \dfrac{(n-k)\,\Var_h}{n^2}}}.}
+\]
+
+\begin{proof}
+From the variance decomposition in the proof of Theorem~\ref{thm:snr-upper}:
+\[
+  \Var[P]
+    = \frac{\sigma^2}{n} + \frac{(n-k)\,\Var_h}{n^2}.
+\]
+The result follows directly from $\mathrm{SNR} = \mathbb{E}[P]/\sqrt{\Var[P]}$.
+\end{proof}
+\end{theorem}
+
+\begin{remark}[When each bound applies]
+\label{rem:bounds}
+\textbf{Upper bound is tight} when $\Var_h \to 0$, i.e., honest clients
+have \emph{highly concentrated} gradients (e.g., IID data with small
+intra-client variance or large $d$ with norm close to $C$).
+In that limit, $\mathrm{SNR} \to kC/(\sigma\sqrt{n})$, which is slightly
+below the upper bound $kC/(\sigma\sqrt{n-k})$ — the gap is a factor of
+$\sqrt{n/(n-k)}$, vanishing as $n\gg k$.
+
+\textbf{Tight bound is essential} under \emph{heterogeneous honest data}:
+when clients' gradient distributions differ significantly (non-IID or
+large intra-client noise), $\Var_h$ can dominate $\sigma^2/n$ and the
+upper bound can overestimate the actual SNR by $30\%$--$50\%$.
+In the PoC experiment ($d=100$, $n=20$, $k=3$, $\sigma=0.1$) the
+upper bound predicted $\mathrm{SNR}\approx 7.3$, while the tight bound
+predicted $\approx 4.9$ and the simulation yielded $\approx 4.7$
+(relative error $<5\%$).
+
+\textbf{Regime boundary.}
+The two formulas diverge significantly when
+\[
+  \frac{(n-k)\,\Var_h}{n^2} \;\gtrsim\; \frac{\sigma^2}{n},
+  \quad\text{i.e., when}\quad
+  \Var_h \;\gtrsim\; \frac{\sigma^2}{n-k}.
+\]
+For $\Var_h \ll \sigma^2/(n-k)$ the simpler Theorem~\ref{thm:snr-upper}
+suffices; otherwise Theorem~\ref{thm:snr-tight} with an empirical
+estimate $\widehat{\Var}_h$ is required.
+
+\textbf{Practical guidance:} use Theorem~\ref{thm:snr-upper} for back-of-the-envelope
+parameter selection; use Theorem~\ref{thm:snr-tight} with empirically
+estimated $\widehat{\Var}_h$ for accurate predictions or experimental
+validation.
+\end{remark}

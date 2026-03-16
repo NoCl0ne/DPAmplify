@@ -1,0 +1,77 @@
+# ── Python ───────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+
+# ── PyTorch / model artifacts ────────────────────────────────────────
+*.pt
+*.pth
+*.ckpt
+checkpoints/
+saved_models/
+
+# ── Jupyter ───────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── Datasets ─────────────────────────────────────────────────────────
+data/
+datasets/
+*.csv
+*.gz
+*.zip
+*.tar
+*.tar.gz
+# Exception: keep test fixtures
+!tests/fixtures/*.csv
+
+# ── Outputs / results ────────────────────────────────────────────────
+results/
+outputs/
+logs/
+*.log
+# Exception: keep figure metadata committed alongside paper
+!paper/figures/*.json
+
+# ── LaTeX ─────────────────────────────────────────────────────────────
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.nav
+*.snm
+*.vrb
+# Exception: keep compiled paper PDF
+!paper/dpamplify_final.pdf
+
+# ── IDE ───────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── OS ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Secrets — NEVER commit credentials ──────────────────────────────
+.env
+secrets.py
+*.key
+*.pem
+*.p12

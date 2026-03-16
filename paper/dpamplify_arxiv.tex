@@ -1,0 +1,171 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{hyperref}
+
+% ── Theorem environments ─────────────────────────────────────────────
+\newtheorem{theorem}{Theorem}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{remark}[theorem]{Remark}
+
+% ── Macros ───────────────────────────────────────────────────────────
+\newcommand{\gadv}{g_{\mathrm{adv}}}
+\newcommand{\gh}{g_h}
+\newcommand{\clip}{\mathrm{clip}}
+\newcommand{\MDP}{\mathcal{M}_{\mathrm{DP}}}
+\newcommand{\Var}{\mathrm{Var}}
+
+\title{DPAmplify: Byzantine Gradient Amplification\\via Differential-Privacy Structure}
+\author{Matteo et al.}
+
+\begin{document}
+\maketitle
+
+% ─────────────────────────────────────────────────────────────────────
+\begin{abstract}
+We present DPAmplify, an attack strategy in which a Byzantine client
+in a differentially-private federated learning system exploits the
+Gaussian DP mechanism to steer global model updates toward an arbitrary
+target direction.  By crafting adversarial gradients whose $\ell_2$
+norm equals the clipping threshold exactly, the attacker ensures that
+the DP mechanism introduces zero bias and that its contributions
+accumulate coherently across rounds.  We derive both a closed-form
+\emph{upper bound} and an \emph{exact} signal-to-noise ratio formula
+that fully accounts for honest gradient heterogeneity, providing a
+sharper characterization of the conditions under which the attack is
+most effective.
+\end{abstract}
+
+% ─────────────────────────────────────────────────────────────────────
+\section{Introduction}
+
+Federated learning (FL) enables collaborative model training without
+sharing raw data.  Differentially-private variants (DP-FedAvg) add
+Gaussian noise to clipped client gradients to bound information
+leakage.  While DP noise is designed to protect privacy, its
+\emph{structured} additive form opens an unexpected attack surface:
+a Byzantine client can craft updates whose expected value after the
+DP mechanism is fully aligned with a chosen target direction.
+
+% ─────────────────────────────────────────────────────────────────────
+\section{Background}
+
+\paragraph{Gaussian DP mechanism.}
+Given a gradient vector $g \in \mathbb{R}^d$, clipping threshold
+$C>0$, and noise scale $\sigma>0$, the mechanism is
+\[
+  \MDP(g) = \clip(g, C) + \xi,\quad \xi \sim \mathcal{N}(0, \sigma^2 I),
+\]
+where $\clip(g, C) = g \cdot \min(1, C/\|g\|_2)$.
+
+\paragraph{FedAvg aggregation.}
+In each round, the server averages the noisy gradients of all $n$
+clients:
+\[
+  \bar{g} = \frac{1}{n}\sum_{i=1}^{n} \MDP(g_i).
+\]
+
+% ─────────────────────────────────────────────────────────────────────
+\section{The DPAmplify Attack}
+
+\paragraph{Core observation.}
+Let $\hat{v}$ be a unit target direction.  Set the adversarial
+gradient $\gadv = C\,\hat{v}$.  Since $\|\gadv\|_2 = C$, clipping
+is the identity:
+\[
+  \clip(\gadv, C) = \gadv,
+  \quad\Rightarrow\quad
+  \mathbb{E}[\MDP(\gadv)] = \gadv = C\,\hat{v}.
+\]
+The adversary's contribution to $\bar{g}$ is \emph{unattenuated in
+expectation} and aligned with $\hat{v}$ regardless of the DP noise
+level~$\sigma$.
+
+\paragraph{Evasion property.}
+Because all gradients are clipped to $\ell_2$ norm $\le C$ before
+noise is added, the post-DP norm distributions of adversarial and
+honest gradients are statistically indistinguishable, making
+norm-based anomaly detectors ineffective.
+
+% ─────────────────────────────────────────────────────────────────────
+\section{Signal-to-Noise Analysis}
+\label{sec:snr}
+
+We characterise the attack strength through the signal-to-noise ratio
+(SNR) of the aggregate gradient in the target direction.
+
+% ── include the two-theorem block ────────────────────────────────────
+\input{../theory/proofs/theorem_snr}
+
+% ─────────────────────────────────────────────────────────────────────
+
+\begin{corollary}[Simpler upper bound]
+\label{cor:upper}
+\[
+  \mathrm{SNR} \;\le\; \frac{k\,C}{\sigma\sqrt{n-k}}.
+\]
+\end{corollary}
+
+The interplay between Theorem~\ref{thm:snr-tight} and
+Corollary~\ref{cor:upper} is central to our contribution:
+
+\begin{quote}
+\textit{Theorem~\ref{thm:snr-tight} (tight bound) reduces to the simpler
+upper bound of Corollary~\ref{cor:upper} when honest gradient variance
+is negligible relative to DP noise, i.e., $\Var_h \ll \sigma^2$.
+Concretely, when $\Var_h = 0$, the tight bound becomes
+$kC/(\sigma\sqrt{n})$, which differs from the upper bound only by the
+factor $\sqrt{n/(n-k)} \approx 1$ for $k \ll n$.}
+\end{quote}
+
+Crucially, this characterises the \textbf{exact conditions} under which
+the attack is most effective:
+\begin{itemize}
+  \item \textbf{IID / concentrated honest data} ($\Var_h \approx 0$):
+        the two bounds coincide; the attack achieves near-maximum SNR.
+        This is the canonical setting of prior DP-FL security analyses.
+  \item \textbf{Non-IID / heterogeneous honest data} ($\Var_h \gg 0$):
+        the tight bound predicts substantially lower SNR than the upper
+        bound.  The attack is \emph{self-limiting} — honest gradient
+        diversity acts as a natural defence.
+\end{itemize}
+This distinction is a stronger contribution than a single closed-form
+bound: we identify the \emph{regime boundary} at $\Var_h \approx \sigma^2/n$
+that separates the attack's effective and ineffective operating conditions.
+
+% ─────────────────────────────────────────────────────────────────────
+\section{Empirical Validation}
+
+We validate both bounds with a NumPy proof-of-concept
+(\texttt{poc.py}) using parameters $d=100$, $n=20$, $k=3$, $C=1.0$,
+$\sigma=0.1$ over 300 simulated FedAvg rounds.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcc}
+\hline
+Quantity & Value & Error \\
+\hline
+SNR upper bound (Corollary~\ref{cor:upper}) & 7.28 & $35.6\%$ \\
+SNR tight bound (Theorem~\ref{thm:snr-tight}) & $\approx 4.9$ & $<5\%$ \\
+Empirical SNR & $\approx 4.7$ & — \\
+\hline
+\end{tabular}
+\caption{SNR comparison ($T=300$ rounds, seed 42).  Estimated
+$\widehat{\Var}_h \approx 0.010$ from post-clip honest projections.}
+\end{table}
+
+The tight bound matches simulation to within 5\%, while the upper bound
+over-predicts by 36\% — confirming that $\Var_h$ is non-negligible in
+the heterogeneous-data regime of this experiment.
+
+% ─────────────────────────────────────────────────────────────────────
+\section{Conclusion}
+
+DPAmplify demonstrates that the Gaussian DP mechanism can be exploited
+by a Byzantine client to coherently steer the global model update.  We
+provide (i) a zero-bias construction, (ii) an evasion argument based
+on norm indistinguishability, and (iii) both an upper-bound and a tight
+SNR formula that together characterise when the attack succeeds and
+when honest gradient heterogeneity naturally limits its effectiveness.
+
+\end{document}
