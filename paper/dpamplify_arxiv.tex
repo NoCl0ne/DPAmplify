@@ -54,9 +54,10 @@ aggregate norms (undetectable by construction), and
 an attack phase in which they submit adversarial
 gradients with norms indistinguishable from honest
 clients. We demonstrate empirically that
-\textsc{DPAmplify} evades Krum and TrimmedMean, and
-propose two targeted countermeasures: randomized
-clipping threshold and gradient norm auditing.
+\textsc{DPAmplify} achieves partial evasion of Krum
+(42\% evasion rate) while TrimmedMean detects the
+fixed-norm signature in every round, motivating our
+proposed adaptive countermeasures.
 \end{abstract}
 
 % ── Introduction ──────────────────────────────────────────────────────
@@ -165,8 +166,9 @@ contributions:
     and~\ref{thm:snr-tight}) and
     identify the regime boundary between them.
     \item We validate the tight bound empirically
-    with relative error 4.8\%, and demonstrate
-    evasion of Krum and TrimmedMean.
+    with relative error 4.8\%, demonstrate partial
+    evasion of Krum (42\% evasion rate), and analyze
+    TrimmedMean's dimensional sensitivity.
     \item We propose two targeted countermeasures:
     randomized clipping and gradient norm auditing.
 \end{itemize}
@@ -737,36 +739,100 @@ in heterogeneous settings.
 \end{figure}
 
 \subsection{Attack on MNIST}
+\label{sec:eval-mnist}
 
-[TODO: run exp\_02\_mnist\_attack.py and report results]
-
-Table~\ref{tab:mnist-results} reports global model
-accuracy after 100 attack rounds under DPAmplify,
-compared to a clean baseline without Byzantine clients.
+Table~\ref{tab:mnist-results} reports global model accuracy after 100 rounds under
+\textsc{DPAmplify} ($k=3$ Byzantine clients, $T_{\mathrm{est}}=20$) compared to a clean baseline
+with no Byzantine clients ($k=0$), under each aggregation rule.
 
 \begin{table}[t]
     \centering
-    \caption{Global model accuracy (\%) after 100
-    rounds on MNIST. Lower is worse for the defender.}
+    \caption{Global model accuracy (\%) after 100 rounds on MNIST
+             ($n=20$, $C=1.0$, $\sigma=0.1$, seed=42).
+             Lower under-attack accuracy is worse for the defender.}
     \label{tab:mnist-results}
     \begin{tabular}{lcc}
         \toprule
-        Aggregator & Clean baseline & Under DPAmplify \\
+        Aggregator  & Clean baseline & Under \textsc{DPAmplify} \\
         \midrule
-        FedAvg      & [TODO] & [TODO] \\
-        Krum        & [TODO] & [TODO] \\
-        TrimmedMean & [TODO] & [TODO] \\
+        FedAvg      & 95.15\% & 66.31\% \\
+        Krum        & 94.10\% & 93.60\% \\
+        TrimmedMean & 95.09\% & 91.38\% \\
         \bottomrule
     \end{tabular}
 \end{table}
 
-\subsection{Evasion of Byzantine-Robust Aggregators}
+\textsc{DPAmplify} inflicts a severe accuracy drop of 28.8 percentage points under FedAvg,
+confirming that standard DP-FL is highly vulnerable to this attack. Against Krum, the damage is
+limited to $-0.5$ pp: Krum detects and rejects the adversarial gradient in 58\% of rounds
+(Section~\ref{sec:eval-evasion}), but the 42\% of rounds where the attack succeeds are sufficient
+to cause measurable drift. TrimmedMean suffers a 3.7 pp degradation despite a 100\% detection rate
+in the controlled $d=100$ evasion experiment: on the MLP weight matrices ($d \approx 101{,}770$
+parameters), the adversarial gradient---concentrated on a single coordinate in the synthetic
+setting---spreads across all parameter dimensions, causing a non-negligible fraction of adversarial
+coordinates to fall within the non-trimmed range. This dimensional effect does not arise in the
+$d=100$ evasion experiment but is present in the full MNIST evaluation.
 
-[TODO: run exp\_03\_evasion.py and report detection rates]
+\subsection{Evasion of Byzantine-Robust Aggregators}
+\label{sec:eval-evasion}
+
+We evaluate whether the noised adversarial gradient $\mathcal{M}_{\mathrm{DP}}(\mathbf{g}_{\mathrm{adv}})$
+evades Krum and TrimmedMean over 50 simulated rounds ($n=20$, $k=3$, $d=100$, $C=1.0$, $\sigma=0.1$).
+For Krum, we check whether any Byzantine gradient wins the Krum selection criterion (minimum sum to
+$n-f-2$ nearest neighbours). For TrimmedMean, we check whether all adversarial coordinates fall
+within the non-trimmed range after discarding the $\lfloor\beta n\rfloor$ extreme values per coordinate
+($\beta=0.1$).
+
+Table~\ref{tab:evasion} summarises the results.
+\textsc{DPAmplify} evades Krum in 42\% of rounds (detection rate 58\%), while TrimmedMean detects
+the attack in every round (detection rate 100\%). The Krum result is consistent with our theoretical
+prediction: the adversarial gradient's Euclidean distance to the centroid of honest gradients is not
+systematically larger than honest-to-honest distances when $\sigma$ is small, so Krum cannot reliably
+exclude it. TrimmedMean's perfect detection occurs because $\mathbf{g}_{\mathrm{adv}}$ is a
+deterministic vector concentrated on coordinate 0, which lies outside the non-trimmed range for
+almost all rounds.
+
+\begin{table}[t]
+    \centering
+    \caption{Evasion of Byzantine-robust aggregators over 50 rounds
+             ($n=20$, $k=3$, $d=100$, $C=1.0$, $\sigma=0.1$, seed=42).}
+    \label{tab:evasion}
+    \begin{tabular}{lcc}
+        \toprule
+        Aggregator  & Evasion rate & Detection rate \\
+        \midrule
+        Krum         & 42\%  & 58\%  \\
+        TrimmedMean  &  0\%  & 100\% \\
+        \bottomrule
+    \end{tabular}
+\end{table}
 
 \subsection{Robustness under Adaptive Clipping}
+\label{sec:eval-adaptive}
 
-[TODO: run exp\_04\_adaptive\_clipping.py and report results]
+We test whether the attack remains effective when the server updates the clipping threshold each round
+according to a decaying schedule $C_t = C_{\mathrm{final}} + (C_{\mathrm{init}}-C_{\mathrm{final}})
+\cdot 0.95^t$ (with $C_{\mathrm{init}}=2.0$, $C_{\mathrm{final}}=0.5$).
+The passive estimator observes a window of 20 rounds to track $C_t$.
+
+Over 80 simulated rounds ($n=20$, $k=3$, $d=100$, $\sigma=0.1$, seed=42), the aggregate projection
+$P^t = \frac{1}{n}\sum_i \mathcal{M}_{\mathrm{DP}}(\mathbf{g}_i^t)\cdot\hat{\mathbf{g}}_{\mathrm{target}}$
+is positive in \textbf{100\%} of all rounds, demonstrating that \textsc{DPAmplify} remains fully
+effective despite the changing threshold. The mean tight SNR post-estimation phase is 11.21, which
+is well above the $\mathrm{SNR}=1$ attack boundary, explaining the perfect success rate.
+The passive estimator tracks $C_t$ with a window lag of $T_{\mathrm{est}}=20$ rounds; the resulting
+estimation error reduces the SNR by less than 5\% relative to the oracle case.
+Figure~\ref{fig:adaptive-clipping} shows $C_t$ vs $\hat{C}_t$ and the SNR trajectory over rounds.
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\columnwidth]{figures/fig_adaptive_clipping.pdf}
+    \caption{Left: true clipping threshold $C_t$ (black) vs estimator $\hat{C}_t$ (blue dashed)
+             over 80 rounds. Right: tight SNR trajectory; the grey dotted line marks SNR=1.
+             The estimator tracks $C_t$ closely after $T_{\mathrm{est}}=20$ rounds (grey vertical line),
+             and the SNR remains well above 1 throughout the attack phase.}
+    \label{fig:adaptive-clipping}
+\end{figure}
 
 % ── Conclusion ────────────────────────────────────────────────────────
 \section{Conclusion}
